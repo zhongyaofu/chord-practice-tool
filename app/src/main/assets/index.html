@@ -1,0 +1,603 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>和弦随机器</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: one screen — chord on manuscript staff, interval wheel docked mid-right, compact start button below */
+:root {
+  --paper: #EEF0F3;
+  --staff: #D3D8E0;
+  --ink: #18233A;
+  --muted: #66718A;
+  --brass: #A8761E;
+  --panel: #FFFFFF;
+  --line: #CBD1DB;
+  --font-display: "Bricolage Grotesque", "Arial Black", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #10151F; --staff: #1D2534; --ink: #E9ECF2; --muted: #8C96AB;
+    --brass: #E1A94A; --panel: #171E2B; --line: #2A3446; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #10151F; --staff: #1D2534; --ink: #E9ECF2; --muted: #8C96AB;
+  --brass: #E1A94A; --panel: #171E2B; --line: #2A3446; color-scheme: dark;
+}
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body { margin: 0; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-display);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+.app {
+  height: 100%;
+  max-width: 680px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-block: 16px;
+  box-sizing: border-box;
+}
+.top {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em;
+  color: var(--muted); text-transform: uppercase;
+}
+.count { font-variant-numeric: tabular-nums; }
+
+.main { flex: 1; min-height: 0; display: flex; align-items: center; gap: 12px; }
+
+/* Stage with faint staff lines */
+.stage {
+  flex: 1; min-width: 0; align-self: stretch;
+  position: relative;
+  container-type: inline-size;
+  display: flex; align-items: center; justify-content: center;
+  background-image: repeating-linear-gradient(to bottom, transparent 0 23px, var(--staff) 23px 24px);
+  background-size: 100% 120px;
+  background-position: center;
+  background-repeat: repeat-x;
+}
+.chord { display: flex; line-height: .9; background: var(--paper); padding: 0 10px; }
+.root, .qual {
+  font-size: clamp(40px, 24cqi, 140px); font-weight: 800; letter-spacing: -.03em; white-space: nowrap;
+}
+.qual { margin-left: .04em; color: var(--brass); }
+.chord.pop { animation: pop .22s ease-out; }
+@keyframes pop { from { transform: translateY(6px); opacity: .35; } to { transform: none; opacity: 1; } }
+
+/* History, shown after stopping */
+.history {
+  position: absolute; inset: 0;
+  background: var(--paper);
+  display: flex; flex-direction: column; gap: 12px;
+  overflow: hidden;
+}
+.history-head {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+  font-size: 18px; font-weight: 800;
+}
+.history-head span { font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--muted); }
+.history ol {
+  list-style: none; margin: 0; padding: 0 0 8px;
+  overflow-y: auto; min-height: 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px;
+  align-content: start;
+  counter-reset: n;
+}
+.history li {
+  counter-increment: n;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 10px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  font-size: 22px; font-weight: 800; letter-spacing: -.02em; white-space: nowrap;
+}
+.history li::before {
+  content: counter(n);
+  font-family: var(--font-mono); font-size: 10px; font-weight: 500; letter-spacing: 0;
+  color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.history li b { font-weight: 800; color: var(--brass); }
+
+/* Range setup, shown before starting */
+.setup {
+  position: absolute; inset: 0;
+  background: var(--paper);
+  overflow-y: auto;
+  display: flex; flex-direction: column; gap: 18px;
+  padding-bottom: 8px;
+}
+.group { display: flex; flex-direction: column; gap: 8px; }
+.group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.group-head h2 { margin: 0; font-size: 18px; font-weight: 800; }
+.links { display: flex; gap: 12px; }
+.link {
+  background: none; border: 0; padding: 2px 0; cursor: pointer;
+  font-family: var(--font-mono); font-size: 12px; color: var(--muted);
+  text-decoration: underline; text-underline-offset: 3px;
+}
+.link:hover { color: var(--ink); }
+.link:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+.chips { display: flex; flex-direction: column; gap: 6px; }
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  min-width: 46px; height: 40px; padding: 0 10px;
+  border-radius: 10px; border: 1.5px solid var(--line);
+  background: var(--panel); color: var(--muted);
+  font-family: var(--font-display); font-size: 17px; font-weight: 800;
+  cursor: pointer;
+}
+.chip[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.chip:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+.setup-note { margin: 0; font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.setup-note.warn { color: var(--brass); }
+.history-head .link { margin-left: auto; }
+
+.bar { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--brass); }
+
+/* Wheel, mid-right */
+.wheel-wrap {
+  position: relative; width: 104px; flex: none;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+}
+.wheel-label {
+  position: absolute; top: 6px; left: 0; right: 0; text-align: center;
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; color: var(--muted);
+  pointer-events: none; z-index: 2;
+}
+.wheel {
+  height: 176px; overflow-y: auto; scroll-snap-type: y mandatory;
+  scrollbar-width: none; overscroll-behavior: contain;
+  mask-image: linear-gradient(to bottom, transparent 6%, #000 36%, #000 64%, transparent 94%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 6%, #000 36%, #000 64%, transparent 94%);
+  outline: none; cursor: grab;
+}
+.wheel::-webkit-scrollbar { display: none; }
+.wheel.dragging { cursor: grabbing; scroll-snap-type: none; }
+.wheel.dragging li { cursor: grabbing; }
+.wheel:focus-visible { box-shadow: inset 0 0 0 2px var(--brass); border-radius: 14px; }
+.wheel ol { list-style: none; margin: 0; padding: 66px 0; }
+.wheel li {
+  height: 44px; display: flex; align-items: center; justify-content: center;
+  scroll-snap-align: center;
+  font-family: var(--font-mono); font-size: 18px; font-variant-numeric: tabular-nums;
+  color: var(--muted); cursor: pointer;
+}
+.wheel li.sel { color: var(--ink); font-size: 22px; }
+.wheel li small { font-size: 11px; margin-left: 3px; }
+.sel-band {
+  position: absolute; left: 8px; right: 8px; top: 66px; height: 44px;
+  border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  pointer-events: none;
+}
+
+/* Start button */
+.footer { display: flex; justify-content: center; gap: 12px; }
+.pause {
+  width: 140px; height: 52px; border-radius: 26px;
+  background: transparent; color: var(--ink); border: 2px solid var(--ink);
+  font-family: var(--font-display); font-size: 20px; font-weight: 800; letter-spacing: .06em;
+  cursor: pointer;
+}
+.pause.paused { background: var(--ink); color: var(--paper); }
+.pause:focus-visible { outline: 3px solid var(--brass); outline-offset: 3px; }
+.pause:active { transform: scale(.97); }.go {
+  width: 160px; height: 52px; border: 0; border-radius: 26px;
+  background: var(--ink); color: var(--paper);
+  font-family: var(--font-display); font-size: 20px; font-weight: 800; letter-spacing: .06em;
+  cursor: pointer;
+}
+.go.on { background: var(--brass); color: #1A1307; }
+.go:focus-visible { outline: 3px solid var(--brass); outline-offset: 3px; }
+.go:active { transform: scale(.97); }
+
+@media (prefers-reduced-motion: reduce) {
+  .chord.pop { animation: none; }
+}
+</style>
+
+<div class="app">
+  <div class="top">
+    <span>根音 × 和弦类型</span>
+    <span class="count" id="count">第 0 个</span>
+  </div>
+
+  <div class="main">
+    <div class="stage">
+      <div class="chord" id="chord" aria-live="polite">
+        <span class="root" id="root">D</span><span class="qual" id="qual">-7</span>
+      </div>
+      <section class="setup" id="setup">
+        <div class="group">
+          <div class="group-head">
+            <h2>和弦类型</h2>
+            <span class="links"><button type="button" class="link" data-set="quals-all">全选</button><button type="button" class="link" data-set="quals-none">清空</button></span>
+          </div>
+          <div class="chips" id="qualChips"></div>
+        </div>
+        <p class="setup-note" id="setupNote"></p>
+      </section>
+      <section class="history" id="history" hidden>
+        <div class="history-head">本次练习 <span id="historyMeta"></span><button type="button" class="link" id="editRange">修改范围</button></div>
+        <ol id="historyList"></ol>
+      </section>
+    </div>
+
+    <div class="wheel-wrap">
+      <div class="wheel-label">间隔</div>
+      <div class="sel-band"></div>
+      <div class="wheel" id="wheel" tabindex="0" aria-label="间隔，上下滚动选择" role="listbox">
+        <ol id="wheelList"></ol>
+      </div>
+    </div>
+  </div>
+
+  <div class="bar"><i id="bar"></i></div>
+
+  <div class="footer">
+    <button class="go" id="go" type="button">开始</button>
+    <button class="pause" id="pause" type="button" hidden>暂停</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  // 12 个音高，每个音高出现概率相同（1/12）；黑键再在两种写法中各取 1/2
+  const PITCHES = [["C"],["C#","Db"],["D"],["D#","Eb"],["E"],["F"],["F#","Gb"],["G"],["G#","Ab"],["A"],["A#","Bb"],["B"]];
+  const QUALS = ["△7","-7","7","m7b5"];
+  const STEPS = Array.from({ length: 20 }, (_, i) => (i + 1) * 0.5); // 0.5 – 10 秒
+
+  const $ = id => document.getElementById(id);
+  const rootEl = $("root"), qualEl = $("qual"), chordEl = $("chord");
+  const countEl = $("count"), barEl = $("bar");
+  const historyEl = $("history"), historyList = $("historyList"), historyMeta = $("historyMeta");
+  const wheel = $("wheel"), list = $("wheelList"), go = $("go");
+
+  const ITEM = 44;
+  let suppressClickUntil = 0;
+  let idx = 3; // 默认 2 秒
+  try { const s = parseInt(localStorage.getItem("interval-idx"), 10); if (s >= 0 && s < STEPS.length) idx = s; } catch (e) {}
+
+  const pickOne = arr => arr[Math.floor(Math.random() * arr.length)];
+  // 选择范围（默认全选，记在本机浏览器里）
+  const ALL_ROOTS = PITCHES.flat();
+  let selRoots = new Set(ALL_ROOTS), selQuals = new Set(QUALS);
+  try {
+    const saved = JSON.parse(localStorage.getItem("chord-range") || "null");
+    if (saved) {
+      selQuals = new Set(saved.quals.filter(q => QUALS.includes(q)));
+    }
+  } catch (e) {}
+  const saveRange = () => { try { localStorage.setItem("chord-range", JSON.stringify({ roots: [...selRoots], quals: [...selQuals] })); } catch (e) {} };
+
+  // 按音高分组：只保留选中的写法；每个选中的音高概率相同，同一音高的写法再平分
+  let pool = [], quals = [];
+  const buildPool = () => {
+    pool = PITCHES.map((sp, p) => ({ p, sp: sp.filter(r => selRoots.has(r)) })).filter(x => x.sp.length);
+    quals = QUALS.filter(q => selQuals.has(q));
+  };
+  const rand = () => {
+    const x = pickOne(pool);
+    return { p: x.p, r: pickOne(x.sp), q: pickOne(quals) };
+  };
+  // 同音高 + 同类型视为同一个和弦（如 C#7 和 Db7），不连续出现
+  const same = (a, b) => a && b && a.p === b.p && a.q === b.q;
+  const pickDifferent = prev => {
+    if (pool.length * quals.length <= 1) return rand(); // 只有一种可能时允许重复
+    let c; do { c = rand(); } while (same(c, prev)); return c;
+  };
+
+  let current = null;
+  let history = [];
+  let running = false, timer = null, startedAt = 0, startTime = 0, raf = 0, wakeLock = null;
+  let paused = false, pausedAt = 0, pausedTotal = 0, remaining = 0, pausedIdx = 0;
+  const pauseBtn = document.getElementById("pause");
+  const stageEl = document.querySelector(".stage");
+
+  // 滚轮
+  STEPS.forEach((s, i) => {
+    const li = document.createElement("li");
+    li.innerHTML = `${s % 1 ? s.toFixed(1) : s}<small>秒</small>`;
+    li.setAttribute("role", "option");
+    li.addEventListener("click", () => {
+      if (performance.now() < suppressClickUntil) return;
+      wheel.scrollTo({ top: i * ITEM, behavior: "smooth" });
+    });
+    list.appendChild(li);
+  });
+  const items = list.children;
+  const markSel = () => [...items].forEach((li, i) => { li.classList.toggle("sel", i === idx); li.setAttribute("aria-selected", i === idx); });
+  wheel.scrollTop = idx * ITEM;
+  markSel();
+
+  let scrollT;
+  wheel.addEventListener("scroll", () => {
+    const i = Math.max(0, Math.min(STEPS.length - 1, Math.round(wheel.scrollTop / ITEM)));
+    if (i !== idx) { idx = i; markSel(); }
+    clearTimeout(scrollT);
+    scrollT = setTimeout(() => {
+      try { localStorage.setItem("interval-idx", idx); } catch (e) {}
+      if (running && !paused) schedule(); // 新间隔立即生效
+    }, 150);
+  });
+
+  // 鼠标按住拖动（触屏本来就能直接滑）
+  let drag = null;
+  wheel.addEventListener("pointerdown", e => {
+    if (e.pointerType !== "mouse" || e.button !== 0) return;
+    drag = { y: e.clientY, top: wheel.scrollTop, moved: false };
+    wheel.setPointerCapture(e.pointerId);
+    wheel.classList.add("dragging");
+    e.preventDefault();
+  });
+  wheel.addEventListener("pointermove", e => {
+    if (!drag) return;
+    const dy = e.clientY - drag.y;
+    if (Math.abs(dy) > 3) drag.moved = true;
+    wheel.scrollTop = drag.top - dy;
+  });
+  const endDrag = e => {
+    if (!drag) return;
+    const moved = drag.moved;
+    drag = null;
+    wheel.classList.remove("dragging");
+    try { wheel.releasePointerCapture(e.pointerId); } catch (err) {}
+    if (moved) suppressClickUntil = performance.now() + 100;
+    wheel.scrollTo({ top: idx * ITEM, behavior: "smooth" });
+  };
+  wheel.addEventListener("pointerup", endDrag);
+  wheel.addEventListener("pointercancel", endDrag);
+
+  wheel.addEventListener("keydown", e => {
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      e.preventDefault();
+      const t = Math.max(0, Math.min(STEPS.length - 1, idx + (e.key === "ArrowDown" ? 1 : -1)));
+      wheel.scrollTo({ top: t * ITEM, behavior: "smooth" });
+    }
+  });
+
+  function render() {
+    rootEl.textContent = current.r;
+    qualEl.textContent = current.q;
+    countEl.textContent = `第 ${history.length} 个`;
+    chordEl.classList.remove("pop"); void chordEl.offsetWidth; chordEl.classList.add("pop");
+  }
+
+  function advance() {
+    current = pickDifferent(current);
+    history.push(current);
+    render();
+  }
+
+  // delay：距离下次换和弦还剩多少毫秒（继续播放时用剩余时间）
+  function schedule(delay) {
+    const full = STEPS[idx] * 1000;
+    if (delay == null || delay > full) delay = full;
+    clearTimeout(timer);
+    startedAt = performance.now() - (full - delay);
+    timer = setTimeout(() => { advance(); click(); schedule(); }, delay);
+  }
+
+  function tickBar() {
+    if (paused) return;
+    if (!running) { barEl.style.width = "0"; return; }
+    const p = Math.min(1, (performance.now() - startedAt) / (STEPS[idx] * 1000));
+    barEl.style.width = (p * 100) + "%";
+    raf = requestAnimationFrame(tickBar);
+  }
+
+  async function lockScreen() {
+    try { if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen"); } catch (e) { wakeLock = null; }
+  }
+
+  function showHistory() {
+    historyList.textContent = "";
+    history.forEach(c => {
+      const li = document.createElement("li");
+      const root = document.createElement("span");
+      root.textContent = c.r;
+      const q = document.createElement("b");
+      q.textContent = c.q;
+      const row = document.createElement("span");
+      row.append(root, q);
+      li.appendChild(row);
+      historyList.appendChild(li);
+    });
+    const secs = Math.round((Date.now() - startTime - pausedTotal) / 1000);
+    const m = Math.floor(secs / 60), s = secs % 60;
+    historyMeta.textContent = `共 ${history.length} 个 · 用时 ${m ? m + " 分 " : ""}${s} 秒`;
+    historyEl.hidden = false;
+    historyList.scrollTop = historyList.scrollHeight;
+  }
+
+  // 范围选择界面
+  const setupEl = $("setup"), noteEl = $("setupNote");
+  const makeChip = (label, set) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "chip"; b.textContent = label;
+    b.setAttribute("aria-pressed", set.has(label));
+    b.addEventListener("click", () => {
+      set.has(label) ? set.delete(label) : set.add(label);
+      b.setAttribute("aria-pressed", set.has(label));
+      rangeChanged();
+    });
+    return b;
+  };
+  const qRow = document.createElement("div");
+  qRow.className = "chip-row";
+  QUALS.forEach(q => qRow.appendChild(makeChip(q, selQuals)));
+  $("qualChips").appendChild(qRow);
+
+  const syncChips = () => {
+    document.querySelectorAll("#qualChips .chip").forEach(b => b.setAttribute("aria-pressed", selQuals.has(b.textContent)));
+  };
+  document.querySelectorAll("[data-set]").forEach(btn => btn.addEventListener("click", () => {
+    const [which, mode] = btn.dataset.set.split("-");
+    const set = which === "roots" ? selRoots : selQuals;
+    const all = which === "roots" ? ALL_ROOTS : QUALS;
+    set.clear();
+    if (mode === "all") all.forEach(x => set.add(x));
+    syncChips();
+    rangeChanged();
+  }));
+
+  function rangeChanged() {
+    buildPool();
+    saveRange();
+    noteEl.classList.remove("warn");
+    if (!quals.length) {
+      noteEl.textContent = "请至少选一个和弦类型";
+      noteEl.classList.add("warn");
+    } else {
+      noteEl.textContent = `12 个根音 × ${quals.length} 种类型`;
+    }
+  }
+  rangeChanged();
+
+  $("editRange").addEventListener("click", () => { historyEl.hidden = true; });
+
+  // 节拍器"哒"声：短促的木块音色（Web Audio 合成，无需音频文件）
+  let audio = null;
+  function initAudio() {
+    try {
+      if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
+      if (audio.state === "suspended") audio.resume();
+    } catch (e) { audio = null; }
+  }
+  function click() {
+    if (!audio) return;
+    const t = audio.currentTime + 0.005;
+    const out = audio.createGain();
+    out.gain.setValueAtTime(0.0001, t);
+    out.gain.exponentialRampToValueAtTime(0.9, t + 0.002);
+    out.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
+    out.connect(audio.destination);
+    [[1700, "sine"], [2600, "triangle"]].forEach(([f, type], i) => {
+      const o = audio.createOscillator();
+      const g = audio.createGain();
+      o.type = type;
+      o.frequency.setValueAtTime(f, t);
+      o.frequency.exponentialRampToValueAtTime(f * 0.8, t + 0.05);
+      g.gain.value = i ? 0.35 : 1;
+      o.connect(g); g.connect(out);
+      o.start(t); o.stop(t + 0.07);
+    });
+  }
+
+  // 3 秒倒计时
+  let counting = false, countTimer = null;
+  function showCount(n) {
+    rootEl.textContent = n;
+    qualEl.textContent = "";
+    chordEl.classList.remove("pop"); void chordEl.offsetWidth; chordEl.classList.add("pop");
+    click();
+  }
+
+  function start() {
+    buildPool();
+    if (!pool.length || !quals.length) {
+      historyEl.hidden = true;
+      rangeChanged();
+      return;
+    }
+    initAudio();
+    counting = true;
+    go.textContent = "停止"; go.classList.add("on");
+    historyEl.hidden = true;
+    setupEl.hidden = true;
+    countEl.textContent = "准备";
+    lockScreen();
+    let n = 3;
+    showCount(n);
+    const step = () => {
+      n--;
+      if (n > 0) { showCount(n); countTimer = setTimeout(step, 1000); }
+      else begin();
+    };
+    countTimer = setTimeout(step, 1000);
+  }
+
+  function begin() {
+    counting = false;
+    running = true;
+    history = [];
+    current = null;
+    startTime = Date.now();
+    pausedTotal = 0;
+    advance();
+    click();
+    schedule();
+    tickBar();
+    pauseBtn.hidden = false;
+  }
+
+  function setPaused(on) {
+    paused = on;
+    pauseBtn.textContent = on ? "继续" : "暂停";
+    pauseBtn.classList.toggle("paused", on);
+    stageEl.classList.toggle("is-paused", on);
+  }
+
+  function pause() {
+    if (!running || paused) return;
+    remaining = Math.max(0, STEPS[idx] * 1000 - (performance.now() - startedAt));
+    pausedIdx = idx;
+    pausedAt = Date.now();
+    clearTimeout(timer);
+    cancelAnimationFrame(raf);
+    countEl.textContent = `已暂停 · 第 ${history.length} 个`;
+    setPaused(true);
+  }
+
+  function resume() {
+    if (!running || !paused) return;
+    initAudio();
+    pausedTotal += Date.now() - pausedAt;
+    setPaused(false);
+    countEl.textContent = `第 ${history.length} 个`;
+    // 暂停期间改过间隔，就按新间隔重新计时；否则接着走完剩下的时间
+    schedule(idx === pausedIdx ? remaining : undefined);
+    tickBar();
+  }
+
+  pauseBtn.addEventListener("click", () => paused ? resume() : pause());
+
+  function stop() {
+    const wasCounting = counting;
+    if (paused) pausedTotal += Date.now() - pausedAt;
+    counting = false;
+    running = false;
+    setPaused(false);
+    pauseBtn.hidden = true;
+    clearTimeout(countTimer);
+    go.textContent = "开始"; go.classList.remove("on");
+    clearTimeout(timer); cancelAnimationFrame(raf);
+    barEl.style.width = "0";
+    try { wakeLock && wakeLock.release(); } catch (e) {}
+    wakeLock = null;
+    setupEl.hidden = false;
+    if (wasCounting) {
+      countEl.textContent = "第 0 个";
+    } else if (history.length) showHistory();
+  }
+
+  go.addEventListener("click", () => (running || counting) ? stop() : start());
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && (running || counting)) lockScreen();
+  });
+})();
+</script>
